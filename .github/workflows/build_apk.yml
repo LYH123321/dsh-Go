@@ -1,17 +1,14 @@
 name: Build Tavern APK
-
 on:
   workflow_dispatch:
   push:
     branches: [main]
-
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -22,26 +19,22 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.7'
           channel: 'master'
           cache: true
-
       - name: Get Dependencies
         run: |
           cd app
           flutter pub get
-
-      - name: Build APK
+      - name: Build Arm64 APK
         run: |
           cd app
-          flutter build apk --release --target-platform android-arm64 --android-skip-build-dependency-validation
-
+          flutter build apk --release --flavor arm64 --target-platform android-arm64 --android-skip-build-dependency-validation
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: dsh-go-tavern-arm64
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/app/outputs/flutter-apk/*.apk
