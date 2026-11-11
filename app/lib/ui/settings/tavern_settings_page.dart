@@ -408,11 +408,8 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       final personality = (data['personality'] ?? '').toString();
       final scenario = (data['scenario'] ?? '').toString();
       final firstMes = (data['first_mes'] ?? '').toString();
-      // 酒馆占位符 → 实际称呼（宿主模板引擎不认 {{user}}/{{char}}，会报 unknown prompt variable）
-      String sub(String s) => s
-          .replaceAll('{{user}}', '用户').replaceAll('{{User}}', '用户')
-          .replaceAll('{{char}}', name).replaceAll('{{Char}}', name)
-          .replaceAll('{{persona}}', '用户');
+      // 宿主模板引擎只认 provider/model，任何 {{...}} 占位符都会报 unknown prompt variable，通配清除
+      String sub(String s) => s.replaceAll(RegExp(r'\{\{[^}]*\}\}'), '');
       final name2 = sub(name);
       final promptLines = <String>[
         '你是「$name」。请完全沉浸在角色扮演中，始终以 $name 的身份与用户对话。',
