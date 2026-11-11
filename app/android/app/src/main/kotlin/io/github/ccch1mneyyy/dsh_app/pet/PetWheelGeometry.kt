@@ -59,17 +59,23 @@ internal class PetWheelGeometry private constructor(
     /**
      * A tap on the fan left open: only a button or its label counts, not the whole sector a slide
      * may pick from, so a touch on the empty mist closes the menu instead of running something.
-     * [labelSpan] is how far button [it]'s label reaches along its own ray.
+     * The label is the horizontal box PetMenuView draws at rest: [labelWidth] wide, [labelHalf]
+     * high either side of its centre.
      */
-    fun tap(x: Float, y: Float, labelSpan: (Int) -> Float): Int? {
-        val index = hit(x, y) ?: return null
-        val a = angle(index)
-        val ux = direction * cos(a).toFloat()
-        val uy = sin(a).toFloat()
-        val along = (x - centerX) * ux + (y - centerY) * uy
-        val across = abs((x - centerX) * uy - (y - centerY) * ux)
-        val half = 31f * density // half the arc one button owns
-        return index.takeIf { across <= half && along >= radius - half && along <= radius + orb + 24f * density + labelSpan(index) }
+    fun tap(x: Float, y: Float, labelHalf: Float, labelWidth: (Int) -> Float): Int? {
+        if (list || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) return null
+        var onLabel: Int? = null
+        for ((i, c) in centers.withIndex()) {
+            // Half the arc one button owns: neighbours' targets touch but never overlap.
+            if (hypot(x - c.first, y - c.second) <= 31f * density) return i
+            if (onLabel != null) continue
+            val ux = direction * cos(angle(i)).toFloat()
+            val uy = sin(angle(i)).toFloat()
+            val width = labelWidth(i)
+            val lead = radius + orb + 9f * density + abs(ux) * width / 2 + abs(uy) * labelHalf * 0.75f
+            if (abs(x - centerX - lead * ux) <= width / 2 + 8f * density && abs(y - centerY - lead * uy) <= labelHalf + 6f * density) onLabel = i
+        }
+        return onLabel
     }
 
     companion object {

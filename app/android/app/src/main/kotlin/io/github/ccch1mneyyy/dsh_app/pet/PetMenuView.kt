@@ -306,10 +306,7 @@ internal class PetMenuView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 selection = null
-                val pressed = g.tap(event.rawX, event.rawY) { i ->
-                    val a = g.angle(i)
-                    abs(cos(a).toFloat()) * labelW[i] + abs(sin(a).toFloat()) * labelPaint.textSize + 16f * g.density
-                }
+                val pressed = g.tap(event.rawX, event.rawY, labelPaint.textSize * 0.88f) { labelW[it] }
                 if (pressed == null) {
                     onOutside()
                     return true

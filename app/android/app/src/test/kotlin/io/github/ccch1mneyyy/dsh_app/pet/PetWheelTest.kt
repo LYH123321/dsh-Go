@@ -180,7 +180,7 @@ class PetWheelTest {
             for (i in 0 until count) {
                 val ux = g.direction * cos(g.angle(i)).toFloat()
                 val uy = sin(g.angle(i)).toFloat()
-                fun at(distance: Float) = g.tap(g.centerX + distance * ux, g.centerY + distance * uy) { 40f }
+                fun at(distance: Float) = g.tap(g.centerX + distance * ux, g.centerY + distance * uy, 9f) { 40f }
                 assertEquals(i, at(g.radius))                      // the button
                 assertEquals(i, at(g.radius + g.orb + 30f))         // its label
                 // The mist between the pet and the button, and past the label: a slide still
@@ -188,13 +188,20 @@ class PetWheelTest {
                 val inner = (g.dead + g.radius - 31f) / 2
                 assertEquals(i, g.hit(g.centerX + inner * ux, g.centerY + inner * uy))
                 assertNull(at(inner))
-                val beyond = g.radius + g.orb + 24f + 40f + 6f
+                val beyond = g.radius + g.orb + 94f
                 assertEquals(i, g.hit(g.centerX + beyond * ux, g.centerY + beyond * uy))
                 assertNull(at(beyond))
+                // The label is a horizontal box, not a strip along the ray: its far ends count
+                // even where the ray is steep, a little past them does not.
+                val lead = g.radius + g.orb + 9f + kotlin.math.abs(ux) * 50f + kotlin.math.abs(uy) * 9f * 0.75f
+                val lx = g.centerX + lead * ux
+                val ly = g.centerY + lead * uy
+                for (dx in listOf(-45f, 45f)) assertEquals(i, g.tap(lx + dx, ly, 9f) { 100f })
+                assertNull(g.tap(lx, ly + 19f * (if (uy < 0) -1 else 1), 9f) { 100f })
             }
             // Inside the ring between two neighbours, off both buttons.
             val mid = (g.angle(0) + g.angle(1)) / 2
-            assertNull(g.tap(g.centerX + g.direction * (g.radius - 40f) * cos(mid).toFloat(), g.centerY + (g.radius - 40f) * sin(mid).toFloat()) { 40f })
+            assertNull(g.tap(g.centerX + g.direction * (g.radius - 40f) * cos(mid).toFloat(), g.centerY + (g.radius - 40f) * sin(mid).toFloat(), 9f) { 40f })
         }
     }
 
