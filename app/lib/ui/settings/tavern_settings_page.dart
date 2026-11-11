@@ -374,8 +374,8 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       var text = f.readAsStringSync();
       // 移除旧的酒馆预设块（从标记行到下一个 "- insert:" 或文件尾）
       final marker = '    # TAVERN_CARD_PRESET_BEGIN';
+      final endMarker = '    # TAVERN_CARD_PRESET_END';
       if (text.contains(marker)) {
-        final endMarker = '    # TAVERN_CARD_PRESET_END';
         final startIdx = text.indexOf(marker);
         final endIdx = text.indexOf(endMarker);
         if (startIdx != -1 && endIdx != -1) {
@@ -1394,7 +1394,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                     try {
                       Directory(_cardsDir).createSync(recursive: true);
                       final safe = name.replaceAll(RegExp(r'\w\u4e00-\u9fa5-'), '_');
-                      final outPath = editPath ?? '$_cardsDir/$safe_spec_v2.json';
+                      final outPath = editPath ?? '$_cardsDir/${safe}_spec_v2.json';
                       File(outPath).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(spec));
                       if (mounted) Navigator.pop(ctx);
                       _scanFiles();
