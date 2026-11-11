@@ -231,11 +231,12 @@ class TerminalScreenState extends ConsumerState<TerminalScreen> {
   }
 
   Future<void> _paste() async {
+    final terminal = _terminal;
     _selection.clearSelection();
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
-    if (text == null || text.isEmpty || !mounted || !_canType) return;
-    _terminal.paste(text);
+    if (text == null || text.isEmpty || !mounted || !_canType || _terminal != terminal) return;
+    terminal.paste(text);
     _toBottom();
   }
 
