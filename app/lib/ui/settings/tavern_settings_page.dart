@@ -21,10 +21,22 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   ];
   
   List<FileSystemEntity> _bookFiles = [];
-  Map<String, dynamic>? _currentBook;
-  String? _currentBookPath;
-  String? _activeBookPath; // 当前激活生效的世界书路径
-  
+  List<FileSystemEntity> _cardFiles = [];
+
+  // 当前激活生效的配置
+  String? _activeCardPath;
+  String? _activeCardName;
+  String? _activeBookPath;
+  String? _activeBookName;
+
+  // 世界书查看与编辑
+  Map<String, dynamic>? _editingBook;
+  String? _editingBookPath;
+
+  // 角色卡查看与绑定详情
+  Map<String, dynamic>? _viewingCard;
+  String? _viewingCardPath;
+
   // 自导入与硬锁设置
   int _maxEntries = 4;
   int _maxChars = 2500;
@@ -36,9 +48,9 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _loadConfig();
-    _scanWorldBooks();
+    _scanFiles();
   }
 
   void _loadConfig() {
@@ -50,7 +62,10 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           _maxEntries = data['max_entries'] ?? 4;
           _maxChars = data['max_chars'] ?? 2500;
           _enableAutoImport = data['enable_auto_import'] ?? true;
+          _activeCardPath = data['active_card_path'];
+          _activeCardName = data['active_card_name'];
           _activeBookPath = data['active_book_path'];
+          _activeBookName = data['active_book_name'];
           if (data['regex_presets'] is List) {
             _regexPresets = List<Map<String, dynamic>>.from(data['regex_presets']);
           }
@@ -66,7 +81,10 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         'max_entries': _maxEntries,
         'max_chars': _maxChars,
         'enable_auto_import': _enableAutoImport,
+        'active_card_path': _activeCardPath,
+        'active_card_name': _activeCardName,
         'active_book_path': _activeBookPath,
+        'active_book_name': _activeBookName,
         'regex_presets': _regexPresets,
       };
       f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(data));
@@ -80,155 +98,45 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     }
   }
 
-  void _scanWorldBooks() {
-    final List<FileSystemEntity> found = [];
+  void _scanFiles() {
+    final List<FileSystemEntity> books = [];
+    final List<FileSystemEntity> cards = [];
+
     for (final dirPath in _scanDirectories) {
       final dir = Directory(dirPath);
       if (dir.existsSync()) {
         try {
           final list = dir.listSync();
           for (final f in list) {
-            if (f.path.endsWith('.json') && !f.path.endsWith('tavern_config.json')) {
-              if (!found.any((item) => item.path == f.path)) {
-                found.add(f);
-              }
+            if (f is File && f.path.endsWith('.json') && !f.path.endsWith('tavern_config.json')) {
+              try {
+                final content = f.readAsStringSync();
+                final d = json.decode(content);
+                if (d is Map) {
+                  // 判断是否是角色卡 (含 spec_v2 或 data.name 或 name+first_mes)
+                  if ((d.containsKey('data') && d['data'] is Map && (d['data'] as Map).containsKey('name')) ||
+                      (d.containsKey('name') && (d.containsKey('personality') || d.containsKey('first_mes')))) {
+                    if (!cards.any((c) => c.path == f.path)) {
+                      cards.add(f);
+                    }
+                  } else if (d.containsKey('entries') || (d.containsKey('character_book') && d['character_book'] is Map)) {
+                    // 独立世界书
+                    if (!books.any((b) => b.path == f.path)) {
+                      books.add(f);
+                    }
+                  }
+                }
+              } catch (_) {}
             }
           }
         } catch (_) {}
       }
     }
+
     setState(() {
-      _bookFiles = found;
+      _bookFiles = books;
+      _cardFiles = cards;
     });
-  }
-
-  void _openCustomPathDialog() {
-    final ctrl = TextEditingController(text: '/sdcard/Download/');
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('输入文件绝对路径导入'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('可输入手机内任意 JSON 世界书或酒馆角色卡路径：', style: TextStyle(fontSize: 13)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: ctrl,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: '/sdcard/Download/xxx.json',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              final p = ctrl.text.trim();
-              if (p.isNotEmpty) {
-                _openBook(p);
-              }
-            },
-            child: const Text('导入读取'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _openBook(String path) {
-    try {
-      final f = File(path);
-      if (!f.existsSync()) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('文件不存在: $path')));
-        return;
-      }
-      final raw = f.readAsStringSync();
-      final decoded = json.decode(raw);
-
-      Map<String, dynamic>? bookData;
-      if (decoded is Map<String, dynamic>) {
-        if (decoded.containsKey('data') && decoded['data'] is Map && decoded['data'].containsKey('character_book')) {
-          bookData = Map<String, dynamic>.from(decoded['data']['character_book']);
-        } else if (decoded.containsKey('character_book') && decoded['character_book'] is Map) {
-          bookData = Map<String, dynamic>.from(decoded['character_book']);
-        } else if (decoded.containsKey('entries')) {
-          bookData = decoded;
-        }
-      }
-
-      if (bookData != null) {
-        setState(() {
-          _currentBookPath = path;
-          _currentBook = bookData;
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未识别到有效的世界书或角色卡设定格式')));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('读取失败: $e')));
-    }
-  }
-
-  void _saveCurrentBook() {
-    if (_currentBookPath != null && _currentBook != null) {
-      try {
-        final f = File(_currentBookPath!);
-        f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(_currentBook));
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('世界书保存成功！')));
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败: $e')));
-      }
-    }
-  }
-
-  void _toggleActiveBook(String path) {
-    setState(() {
-      if (_activeBookPath == path) {
-        _activeBookPath = null; // 取消激活
-      } else {
-        _activeBookPath = path; // 设为当前激活
-      }
-    });
-    _saveConfig();
-  }
-
-  void _deleteBookFile(String path) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('确认删除文件？'),
-        content: Text('即将从本地存储彻底删除：\n$path'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              Navigator.pop(ctx);
-              try {
-                final f = File(path);
-                if (f.existsSync()) {
-                  f.deleteSync();
-                }
-                if (_activeBookPath == path) {
-                  _activeBookPath = null;
-                  _saveConfig(notify: false);
-                }
-                _scanWorldBooks();
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('文件已删除')));
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('删除失败: $e')));
-              }
-            },
-            child: const Text('删除'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -238,7 +146,9 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         title: const Text('酒馆设定与自导入'),
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
           tabs: const [
+            Tab(text: '角色卡装配'),
             Tab(text: '世界书管理'),
             Tab(text: '自导入硬锁'),
             Tab(text: '预设正则'),
@@ -248,6 +158,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       body: TabBarView(
         controller: _tabController,
         children: [
+          _buildCharacterCardsTab(),
           _buildWorldBookTab(),
           _buildAutoImportTab(),
           _buildRegexTab(),
@@ -256,9 +167,341 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     );
   }
 
+  // ================= 1. 角色卡装配与世界书绑定 =================
+  Widget _buildCharacterCardsTab() {
+    if (_viewingCard != null) {
+      return _buildCardDetailView();
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        // 顶部当前装配生效卡片
+        Card(
+          color: _activeCardPath != null ? Colors.blue.withOpacity(0.08) : null,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: _activeCardPath != null ? Colors.blue : Colors.transparent, width: 1.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _activeCardPath != null ? Icons.account_circle : Icons.person_off_outlined,
+                      color: _activeCardPath != null ? Colors.blue : Colors.grey,
+                      size: 32,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _activeCardPath != null ? '当前装配角色：${_activeCardName ?? ""}' : '当前未装配任何角色卡',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _activeCardPath != null ? '文件：${_activeCardPath!.split('/').last}' : '装配角色卡后，将自动加载其人设及绑定的专属世界书',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_activeCardPath != null)
+                      FilledButton.tonal(
+                        onPressed: () {
+                          setState(() {
+                            _activeCardPath = null;
+                            _activeCardName = null;
+                          });
+                          _saveConfig();
+                        },
+                        child: const Text('卸下'),
+                      ),
+                  ],
+                ),
+                if (_activeBookPath != null) ...[
+                  const Divider(height: 20),
+                  Row(
+                    children: [
+                      const Icon(Icons.link, color: Colors.green, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '当前生效绑定的世界书：${_activeBookName ?? _activeBookPath!.split("/").last}',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                icon: const Icon(Icons.add_link),
+                label: const Text('路径导入角色卡'),
+                onPressed: () => _openPathImportDialog(isCard: true),
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              icon: const Icon(Icons.refresh),
+              tooltip: '刷新本地扫描',
+              onPressed: _scanFiles,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Text('手机扫描到的角色卡：', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const SizedBox(height: 8),
+        if (_cardFiles.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(24.0),
+            child: Center(child: Text('未在常用目录扫描到角色卡，可点击上方「路径导入角色卡」')),
+          )
+        else
+          ..._cardFiles.map((f) {
+            final isActive = _activeCardPath == f.path;
+            String cardName = f.path.split('/').last;
+            bool hasEmbeddedBook = false;
+            try {
+              final d = json.decode(File(f.path).readAsStringSync());
+              if (d is Map) {
+                if (d.containsKey('data') && d['data'] is Map) {
+                  cardName = d['data']['name'] ?? cardName;
+                  hasEmbeddedBook = d['data'].containsKey('character_book');
+                } else if (d.containsKey('name')) {
+                  cardName = d['name'] ?? cardName;
+                  hasEmbeddedBook = d.containsKey('character_book');
+                }
+              }
+            } catch (_) {}
+
+            return Card(
+              elevation: isActive ? 2 : 1,
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: isActive ? Colors.blue : Colors.grey[200],
+                  child: Icon(Icons.person, color: isActive ? Colors.white : Colors.black54),
+                ),
+                title: Text(cardName, style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
+                subtitle: Text(
+                  '${f.path.split("/").last} | ${hasEmbeddedBook ? "内嵌角色专属世界书" : "无内嵌世界书"}',
+                  style: TextStyle(fontSize: 12, color: hasEmbeddedBook ? Colors.indigo : Colors.grey[600]),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton.tonal(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isActive ? Colors.blue.withOpacity(0.15) : null,
+                        foregroundColor: isActive ? Colors.blue[800] : null,
+                      ),
+                      onPressed: () => _equipCard(f.path, cardName, hasEmbeddedBook),
+                      child: Text(isActive ? '装配中' : '装配'),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_forward_ios, size: 16),
+                      onPressed: () => _openCardDetail(f.path),
+                    ),
+                  ],
+                ),
+                onTap: () => _openCardDetail(f.path),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  void _equipCard(String path, String name, bool hasEmbeddedBook) {
+    setState(() {
+      if (_activeCardPath == path) {
+        _activeCardPath = null;
+        _activeCardName = null;
+      } else {
+        _activeCardPath = path;
+        _activeCardName = name;
+
+        // 如果角色卡自带内嵌专属世界书，自动将其绑定激活为当前世界书
+        if (hasEmbeddedBook) {
+          _activeBookPath = path;
+          _activeBookName = '$name (角色卡专属世界书)';
+        }
+      }
+    });
+    _saveConfig();
+  }
+
+  void _openCardDetail(String path) {
+    try {
+      final f = File(path);
+      final d = json.decode(f.readAsStringSync());
+      if (d is Map) {
+        setState(() {
+          _viewingCardPath = path;
+          _viewingCard = Map<String, dynamic>.from(d);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('读取角色卡失败: $e')));
+    }
+  }
+
+  Widget _buildCardDetailView() {
+    final d = _viewingCard!;
+    final cardData = (d['data'] is Map) ? d['data'] : d;
+    final name = cardData['name']?.toString() ?? '未知角色';
+    final desc = cardData['description']?.toString() ?? '';
+    final personality = cardData['personality']?.toString() ?? '';
+    final firstMes = cardData['first_mes']?.toString() ?? '';
+    final bool hasBook = cardData.containsKey('character_book') && cardData['character_book'] is Map;
+    final bookData = hasBook ? cardData['character_book'] : null;
+    final entries = (bookData != null && bookData['entries'] is List) ? (bookData['entries'] as List) : [];
+
+    final isEquipped = _activeCardPath == _viewingCardPath;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => setState(() => _viewingCard = null),
+            ),
+            Expanded(
+              child: Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
+            FilledButton(
+              onPressed: () => _equipCard(_viewingCardPath!, name, hasBook),
+              child: Text(isEquipped ? '卸下角色' : '装配此角色'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('角色人设与性格：', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Text(personality.isNotEmpty ? personality : (desc.isNotEmpty ? desc : '无描述'), style: const TextStyle(fontSize: 13)),
+                if (firstMes.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text('开场问候语 (First Message)：', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Text(firstMes, maxLines: 4, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13, fontStyle: FontStyle.italic)),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          color: Colors.indigo.withOpacity(0.05),
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: Colors.indigo.withOpacity(0.3), width: 1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('专属世界书 (${entries.length} 条)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    if (hasBook)
+                      FilledButton.tonal(
+                        onPressed: () {
+                          // 将内嵌世界书转入世界书编辑模式
+                          setState(() {
+                            _editingBookPath = _viewingCardPath;
+                            _editingBook = Map<String, dynamic>.from(bookData);
+                            _viewingCard = null;
+                            _tabController.animateTo(1); // 切换到世界书页
+                          });
+                        },
+                        child: const Text('管理/编辑词条'),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(hasBook ? '该角色卡内嵌了 ${entries.length} 条世界书背景设定。装配该角色时会自动绑定此世界书。' : '该角色卡无内嵌世界书，可在下方「绑定外部世界书」选择外部世界书联动。', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('绑定外部独立世界书：', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text('如果不使用内嵌世界书，或者想挂载额外的世界观，可以直接在已扫描到的外部世界书中选择一本绑定：', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 12),
+                if (_bookFiles.isEmpty)
+                  const Text('暂无独立世界书文件', style: TextStyle(color: Colors.grey))
+                else
+                  ..._bookFiles.map((b) {
+                    final isBound = _activeBookPath == b.path;
+                    final bName = b.path.split('/').last;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.menu_book),
+                      title: Text(bName),
+                      trailing: FilledButton.tonal(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: isBound ? Colors.green.withOpacity(0.15) : null,
+                          foregroundColor: isBound ? Colors.green[800] : null,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            if (isBound) {
+                              _activeBookPath = null;
+                              _activeBookName = null;
+                            } else {
+                              _activeBookPath = b.path;
+                              _activeBookName = bName;
+                            }
+                          });
+                          _saveConfig();
+                        },
+                        child: Text(isBound ? '已绑定' : '绑定此书'),
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ================= 2. 独立世界书管理 =================
   Widget _buildWorldBookTab() {
-    if (_currentBook != null) {
-      final entriesRaw = _currentBook!['entries'];
+    if (_editingBook != null) {
+      final entriesRaw = _editingBook!['entries'];
       List<dynamic> entries = [];
       if (entriesRaw is List) {
         entries = entriesRaw;
@@ -266,7 +509,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         entries = entriesRaw.values.toList();
       }
 
-      final isBookActive = _activeBookPath == _currentBookPath;
+      final isBookActive = _activeBookPath == _editingBookPath;
 
       return Column(
         children: [
@@ -277,14 +520,14 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
               children: [
                 IconButton(
                   icon: const Icon(Icons.arrow_back),
-                  onPressed: () => setState(() => _currentBook = null),
+                  onPressed: () => setState(() => _editingBook = null),
                 ),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${_currentBookPath?.split('/').last}',
+                        '${_editingBookPath?.split('/').last}',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -300,14 +543,25 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                   ),
                 ),
                 FilledButton.tonal(
-                  onPressed: () => _toggleActiveBook(_currentBookPath!),
+                  onPressed: () {
+                    setState(() {
+                      if (isBookActive) {
+                        _activeBookPath = null;
+                        _activeBookName = null;
+                      } else {
+                        _activeBookPath = _editingBookPath;
+                        _activeBookName = _editingBookPath!.split('/').last;
+                      }
+                    });
+                    _saveConfig();
+                  },
                   child: Text(isBookActive ? '卸载' : '装载生效'),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
                   icon: const Icon(Icons.save, size: 18),
                   label: const Text('保存'),
-                  onPressed: _saveCurrentBook,
+                  onPressed: _saveEditingBook,
                 ),
               ],
             ),
@@ -369,7 +623,6 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // 顶部展示当前装载的世界书状态
         Card(
           color: _activeBookPath != null ? Colors.green.withOpacity(0.08) : null,
           shape: RoundedRectangleBorder(
@@ -391,12 +644,12 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _activeBookPath != null ? '当前装载生效中：' : '当前未装载任何世界书',
+                        _activeBookPath != null ? '当前装载世界书：${_activeBookName ?? ""}' : '当前未装载任何世界书',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _activeBookPath != null ? _activeBookPath!.split('/').last : '请在下方列表中选择一本点击「装载」，或点击路径导入',
+                        _activeBookPath != null ? _activeBookPath!.split('/').last : '可从下方列表或角色卡内嵌中选择装载',
                         style: TextStyle(fontSize: 13, color: Colors.grey[700]),
                       ),
                     ],
@@ -404,7 +657,13 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 ),
                 if (_activeBookPath != null)
                   FilledButton.tonal(
-                    onPressed: () => _toggleActiveBook(_activeBookPath!),
+                    onPressed: () {
+                      setState(() {
+                        _activeBookPath = null;
+                        _activeBookName = null;
+                      });
+                      _saveConfig();
+                    },
                     child: const Text('卸载'),
                   ),
               ],
@@ -417,37 +676,35 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
             Expanded(
               child: FilledButton.icon(
                 icon: const Icon(Icons.input),
-                label: const Text('自定义路径导入'),
-                onPressed: _openCustomPathDialog,
+                label: const Text('路径导入世界书'),
+                onPressed: () => _openPathImportDialog(isCard: false),
               ),
             ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
               icon: const Icon(Icons.refresh),
               tooltip: '刷新本地扫描',
-              onPressed: _scanWorldBooks,
+              onPressed: _scanFiles,
             ),
           ],
         ),
         const SizedBox(height: 16),
-        const Text('手机扫描到的世界书与角色卡列表：', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const Text('手机扫描到的独立世界书列表：', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 8),
         if (_bookFiles.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: Text('未扫描到世界书，可点击上方「自定义路径导入」直接加载')),
+            child: Center(child: Text('未扫描到独立世界书')),
           )
         else
           ..._bookFiles.map((f) {
             final isActive = _activeBookPath == f.path;
+            final name = f.path.split('/').last;
             return Card(
               elevation: isActive ? 2 : 1,
               child: ListTile(
                 leading: Icon(Icons.menu_book, color: isActive ? Colors.green : null),
-                title: Text(
-                  f.path.split('/').last,
-                  style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
-                ),
+                title: Text(name, style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal)),
                 subtitle: Text(isActive ? '【当前使用中】' : f.path),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -457,21 +714,161 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                         backgroundColor: isActive ? Colors.green.withOpacity(0.15) : null,
                         foregroundColor: isActive ? Colors.green[800] : null,
                       ),
-                      onPressed: () => _toggleActiveBook(f.path),
+                      onPressed: () {
+                        setState(() {
+                          if (isActive) {
+                            _activeBookPath = null;
+                            _activeBookName = null;
+                          } else {
+                            _activeBookPath = f.path;
+                            _activeBookName = name;
+                          }
+                        });
+                        _saveConfig();
+                      },
                       child: Text(isActive ? '使用中' : '装载'),
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                       tooltip: '删除此文件',
-                      onPressed: () => _deleteBookFile(f.path),
+                      onPressed: () => _deleteFile(f.path, isCard: false),
                     ),
                   ],
                 ),
-                onTap: () => _openBook(f.path),
+                onTap: () => _openBookForEditing(f.path),
               ),
             );
           }),
       ],
+    );
+  }
+
+  void _openBookForEditing(String path) {
+    try {
+      final f = File(path);
+      final raw = f.readAsStringSync();
+      final decoded = json.decode(raw);
+      Map<String, dynamic>? bookData;
+
+      if (decoded is Map<String, dynamic>) {
+        if (decoded.containsKey('data') && decoded['data'] is Map && decoded['data'].containsKey('character_book')) {
+          bookData = Map<String, dynamic>.from(decoded['data']['character_book']);
+        } else if (decoded.containsKey('character_book') && decoded['character_book'] is Map) {
+          bookData = Map<String, dynamic>.from(decoded['character_book']);
+        } else if (decoded.containsKey('entries')) {
+          bookData = decoded;
+        }
+      }
+
+      if (bookData != null) {
+        setState(() {
+          _editingBookPath = path;
+          _editingBook = bookData;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('打开世界书失败: $e')));
+    }
+  }
+
+  void _saveEditingBook() {
+    if (_editingBookPath != null && _editingBook != null) {
+      try {
+        final f = File(_editingBookPath!);
+        final raw = f.readAsStringSync();
+        final decoded = json.decode(raw);
+
+        // 如果是内嵌在角色卡中的世界书，写回角色卡的 character_book 节点
+        if (decoded is Map && decoded.containsKey('data') && decoded['data'] is Map && (decoded['data'] as Map).containsKey('character_book')) {
+          decoded['data']['character_book'] = _editingBook;
+          f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(decoded));
+        } else if (decoded is Map && decoded.containsKey('character_book')) {
+          decoded['character_book'] = _editingBook;
+          f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(decoded));
+        } else {
+          // 普通独立世界书
+          f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(_editingBook));
+        }
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('保存成功！')));
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败: $e')));
+      }
+    }
+  }
+
+  void _deleteFile(String path, {required bool isCard}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除文件？'),
+        content: Text('即将从本地存储彻底删除：\n$path'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              try {
+                final f = File(path);
+                if (f.existsSync()) f.deleteSync();
+                if (_activeBookPath == path) {
+                  _activeBookPath = null;
+                  _activeBookName = null;
+                }
+                if (_activeCardPath == path) {
+                  _activeCardPath = null;
+                  _activeCardName = null;
+                }
+                _saveConfig(notify: false);
+                _scanFiles();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('文件已删除')));
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+              }
+            },
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openPathImportDialog({required bool isCard}) {
+    final ctrl = TextEditingController(text: '/sdcard/Download/');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isCard ? '输入角色卡路径导入' : '输入世界书路径导入'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('可输入手机内任意 JSON ${isCard ? "角色卡 (含人设/开场白)" : "世界书"} 绝对路径：', style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(border: OutlineInputBorder(), hintText: '/sdcard/Download/xxx.json'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final p = ctrl.text.trim();
+              if (p.isNotEmpty) {
+                if (isCard) {
+                  _openCardDetail(p);
+                } else {
+                  _openBookForEditing(p);
+                }
+              }
+            },
+            child: const Text('导入读取'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -512,6 +909,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     );
   }
 
+  // ================= 3. 自导入硬锁 =================
   Widget _buildAutoImportTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -576,6 +974,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     );
   }
 
+  // ================= 4. 预设正则 =================
   Widget _buildRegexTab() {
     return ListView(
       padding: const EdgeInsets.all(16),
