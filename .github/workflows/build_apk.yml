@@ -1,0 +1,42 @@
+name: Build Tavern APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Get Dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build APK
+        run: |
+          cd app
+          flutter build apk --release --target-platform android-arm64
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-go-tavern-arm64
+          path: app/build/app/outputs/flutter-apk/app-release.apk
