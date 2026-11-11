@@ -26,6 +26,8 @@ internal class PetWheelGeometry private constructor(
     val density: Float,
     /** A scrollable, full-label click alternative when a readable fan cannot fit. */
     val list: Boolean,
+    /** How far from the centre the mist behind the fan reaches before it has faded out. */
+    val mist: Float = 0f,
 ) {
     val direction: Float get() = if (side == Side.LEFT) 1f else -1f
     val orb: Float get() = buttonWidth / 2f
@@ -105,8 +107,8 @@ internal class PetWheelGeometry private constructor(
                 val a = -PI / 2 + (i + 0.5) * PI / count
                 (cx + sign * radius * cos(a).toFloat()) to (cy + radius * sin(a).toFloat())
             }
-            // The mist fades out 150dp past the buttons and reaches back over the pet's own edge.
-            val mist = radius + 150 * d
+            // The mist fades out past the longest label and reaches back over the pet's own edge.
+            val mist = maxOf(radius + 150 * d, inwardW + 40 * d)
             val back = 72 * d
             val x0 = if (side == Side.LEFT) cx - back else cx - mist
             val x1 = if (side == Side.LEFT) cx + mist else cx + back
@@ -115,7 +117,7 @@ internal class PetWheelGeometry private constructor(
                     x0.toInt().coerceAtLeast(area.left), (cy - mist).toInt().coerceAtLeast(area.top),
                     ceil(x1).toInt().coerceAtMost(area.screenW - area.right), ceil(cy + mist).toInt().coerceAtMost(area.screenH - area.bottom),
                 ),
-                side, cx, cy, radius, size, size, centers, d, false,
+                side, cx, cy, radius, size, size, centers, d, false, mist,
             )
         }
     }

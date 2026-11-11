@@ -165,13 +165,13 @@ internal class PetMenuView(
         labelW = FloatArray(n) { labelPaint.measureText(rows[it].shortLabel) }
         val cx = g.centerX - g.bounds.left
         val cy = g.centerY - g.bounds.top
-        val outer = g.radius + 150f * g.density
+        val outer = g.mist
         val full = withAlpha(mistColor, 0.9f)
         mistPaint.shader = RadialGradient(
             cx, cy, outer,
             // Clear over the pet itself, full behind the buttons and their labels, then gone.
             intArrayOf(withAlpha(mistColor, 0f), withAlpha(mistColor, 0f), full, full, withAlpha(mistColor, 0.4f), withAlpha(mistColor, 0f)),
-            floatArrayOf(0f, 30f * g.density / outer, 72f * g.density / outer, (g.radius + 84f * g.density) / outer, (g.radius + 118f * g.density) / outer, 1f),
+            floatArrayOf(0f, 30f * g.density / outer, 72f * g.density / outer, 1f - 66f * g.density / outer, 1f - 32f * g.density / outer, 1f),
             Shader.TileMode.CLAMP,
         )
         for ((i, row) in rows.withIndex()) {

@@ -201,7 +201,11 @@ class PetWheelTest {
     @Test fun aLongerLabelMovesTheFanInwardOrFallsBackToTheList() {
         val wide = PetWheelGeometry.fit(7, Side.RIGHT, 412f - 30f, 460f, area, 1f, 1f, labelWidth = 140f)
         assertFalse(wide.list)
-        assertTrue(wide.centerX - (wide.radius + wide.orb * 1.24f + 9f + 24f + 140f) >= area.left)
+        val labelEnd = wide.centerX - (wide.radius + wide.orb * 1.24f + 9f + 24f + 140f)
+        assertTrue(labelEnd >= area.left)
+        // The window and the mist behind it reach past the long label too, so it is not clipped.
+        assertTrue(wide.bounds.left <= labelEnd)
+        assertTrue(wide.mist >= wide.centerX - labelEnd + 32f)
         assertTrue(PetWheelGeometry.fit(7, Side.LEFT, 30f, 460f, area, 1f, 1f, labelWidth = 400f).list)
     }
 
