@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
 
 class TavernSettingsPage extends StatefulWidget {
   const TavernSettingsPage({super.key});
@@ -14,10 +13,12 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   late TabController _tabController;
   final String _configPath = '/sdcard/Download/st/tavern_config.json';
   
-  List<String> _scanDirectories = [
+  // 常用目录，覆盖系统下载、浏览器下载、ST数据目录等
+  final List<String> _scanDirectories = [
     '/sdcard/Download',
     '/sdcard/Download/st',
     '/sdcard/Download/Browser',
+    '/sdcard/Documents',
   ];
   
   List<FileSystemEntity> _bookFiles = [];
@@ -95,29 +96,54 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     });
   }
 
-  Future<void> _pickAndImportFile() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json', 'png', 'webp'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final filePath = result.files.single.path!;
-        _openBook(filePath);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('选择文件失败: $e')));
-    }
+  void _openCustomPathDialog() {
+    final ctrl = TextEditingController(text: '/sdcard/Download/');
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入文件绝对路径导入'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('可输入手机内任意 JSON 世界书或酒馆角色卡路径：', style: TextStyle(fontSize: 13)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: '/sdcard/Download/xxx.json',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              final p = ctrl.text.trim();
+              if (p.isNotEmpty) {
+                _openBook(p);
+              }
+            },
+            child: const Text('导入读取'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _openBook(String path) {
     try {
       final f = File(path);
+      if (!f.existsSync()) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('文件不存在: $path')));
+        return;
+      }
       final raw = f.readAsStringSync();
       final decoded = json.decode(raw);
 
-      // 支持提取酒馆角色卡内嵌的 character_book 或独立世界书
       Map<String, dynamic>? bookData;
       if (decoded is Map<String, dynamic>) {
         if (decoded.containsKey('data') && decoded['data'] is Map && decoded['data'].containsKey('character_book')) {
@@ -251,9 +277,9 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           children: [
             Expanded(
               child: FilledButton.icon(
-                icon: const Icon(Icons.file_open),
-                label: const Text('选择外部文件导入 (.json)'),
-                onPressed: _pickAndImportFile,
+                icon: const Icon(Icons.input),
+                label: const Text('自定义路径导入'),
+                onPressed: _openCustomPathDialog,
               ),
             ),
             const SizedBox(width: 8),
@@ -265,12 +291,12 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           ],
         ),
         const SizedBox(height: 16),
-        const Text('手机本地扫描到的世界书与设定集：', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('手机扫描到的世界书与角色卡：', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         if (_bookFiles.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: Text('未发现世界书文件，请点击上方按钮直接选择导入')),
+            child: Center(child: Text('未扫描到世界书，可点击上方「自定义路径导入」直接加载')),
           )
         else
           ..._bookFiles.map((f) => Card(
@@ -402,9 +428,9 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
             ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
-              icon: const Icon(Icons.file_upload),
-              tooltip: '从文件导入正则预设',
-              onPressed: _importRegexFromFile,
+              icon: const Icon(Icons.paste),
+              tooltip: '从剪贴板/JSON文本批量导入',
+              onPressed: _importRegexFromTextDialog,
             ),
           ],
         ),
@@ -503,26 +529,42 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     );
   }
 
-  Future<void> _importRegexFromFile() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-      );
-
-      if (result != null && result.files.single.path != null) {
-        final content = File(result.files.single.path!).readAsStringSync();
-        final decoded = json.decode(content);
-        if (decoded is List) {
-          setState(() {
-            _regexPresets.addAll(List<Map<String, dynamic>>.from(decoded));
-          });
-          _saveConfig();
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已导入 ${decoded.length} 条正则预设！')));
-        }
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('导入正则失败: $e')));
-    }
+  void _importRegexFromTextDialog() {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('粘贴正则配置导入'),
+        content: TextField(
+          controller: ctrl,
+          maxLines: 8,
+          decoration: const InputDecoration(
+            hintText: '[{"name": "...", "pattern": "...", "replacement": ""}]',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () {
+              try {
+                final decoded = json.decode(ctrl.text.trim());
+                if (decoded is List) {
+                  setState(() {
+                    _regexPresets.addAll(List<Map<String, dynamic>>.from(decoded));
+                  });
+                  _saveConfig();
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('已成功导入 ${decoded.length} 条正则规则！')));
+                }
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('解析JSON失败: $e')));
+              }
+            },
+            child: const Text('导入'),
+          ),
+        ],
+      ),
+    );
   }
 }
