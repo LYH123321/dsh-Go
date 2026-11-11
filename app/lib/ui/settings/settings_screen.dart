@@ -199,6 +199,13 @@ class SettingsScreen extends ConsumerWidget {
                     ),
               onTap: () => _push(context, const PluginsScreen()),
             ),
+            SettingsTile(
+              icon: AppIcons.documents,
+              tint: SettingsHues.abilities,
+              spot: const SettingsSpot('tavern_settings', '酒馆设定与自导入'),
+              value: text('世界书/自导入'),
+              onTap: () => _push(context, const TavernSettingsPage()),
+            ),
             // The plugins' own settings sections, when the host has any.
             ...pluginSettingsTiles(ref, tint: SettingsHues.abilities),
           ],
