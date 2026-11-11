@@ -408,26 +408,32 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       final personality = (data['personality'] ?? '').toString();
       final scenario = (data['scenario'] ?? '').toString();
       final firstMes = (data['first_mes'] ?? '').toString();
+      // 酒馆占位符 → 实际称呼（宿主模板引擎不认 {{user}}/{{char}}，会报 unknown prompt variable）
+      String sub(String s) => s
+          .replaceAll('{{user}}', '用户').replaceAll('{{User}}', '用户')
+          .replaceAll('{{char}}', name).replaceAll('{{Char}}', name)
+          .replaceAll('{{persona}}', '用户');
+      final name2 = sub(name);
       final promptLines = <String>[
         '你是「$name」。请完全沉浸在角色扮演中，始终以 $name 的身份与用户对话。',
-        if (desc.isNotEmpty) '【角色设定】\n$desc',
-        if (personality.isNotEmpty) '【性格特征】\n$personality',
-        if (scenario.isNotEmpty) '【当前场景】\n$scenario',
-        if (firstMes.isNotEmpty) '【开场白参考】\n$firstMes',
+        if (desc.isNotEmpty) '【角色设定】\n${sub(desc)}',
+        if (personality.isNotEmpty) '【性格特征】\n${sub(personality)}',
+        if (scenario.isNotEmpty) '【当前场景】\n${sub(scenario)}',
+        if (firstMes.isNotEmpty) '【开场白参考】\n${sub(firstMes)}',
         '【扮演规则】',
         '- 永远保持 $name 的身份、语气和性格，不要跳出角色。',
         '- 说话自然生动，符合角色人设，不要使用助手式的口吻。',
         '- 不讨论扮演本身，除非用户明确要求。',
       ];
-      final prefix = json.encode(promptLines.join('\n'));
+      final prefix = json.encode(sub(promptLines.join('\n')));
       final block = [
         '# TAVERN_CARD_PRESET_BEGIN',
         '    - id: preset-tavern-card',
         "      name: '@deepseek-ai/dsh-agent-preset'",
         '      config:',
         '        id: tavern-card',
-        '        name: ${esc('酒馆·$name')}',
-        '        description: ${esc('角色卡扮演：$name。只有人设，没有工具。')}',
+        '        name: ${esc('酒馆·$name2')}',
+        '        description: ${esc('角色卡扮演：$name2。只有人设，没有工具。')}',
         '        order: 92',
         '        plugins:',
         '          - id: persona',
