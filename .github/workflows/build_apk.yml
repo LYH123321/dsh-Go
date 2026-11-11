@@ -9,6 +9,7 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -19,22 +20,45 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.47.7'
           channel: 'master'
           cache: true
+
+      - name: Download Original Full Runtime Bundle
+        run: |
+          mkdir -p runtime/out/arm64-v8a/assets/runtime
+          mkdir -p runtime/out/arm64-v8a/jniLibs/arm64-v8a
+          
+          echo "Fetching official v1.0.15 APK for full runtime assets..."
+          curl -sL -o /tmp/dsh_official.apk https://github.com/ccch1mneyyy/dsh-Go/releases/download/v1.0.15/dsh-go-1.0.15-arm64.apk
+          
+          echo "Extracting runtime and jni libraries..."
+          unzip -q /tmp/dsh_official.apk 'assets/runtime/*' -d /tmp/apk_extracted
+          unzip -q /tmp/dsh_official.apk 'lib/arm64-v8a/*' -d /tmp/apk_extracted
+          
+          cp -r /tmp/apk_extracted/assets/runtime/* runtime/out/arm64-v8a/assets/runtime/
+          cp -r /tmp/apk_extracted/lib/arm64-v8a/* runtime/out/arm64-v8a/jniLibs/arm64-v8a/
+          
+          rm -rf /tmp/dsh_official.apk /tmp/apk_extracted
+          ls -lh runtime/out/arm64-v8a/assets/runtime/
+          ls -lh runtime/out/arm64-v8a/jniLibs/arm64-v8a/
+
       - name: Get Dependencies
         run: |
           cd app
           flutter pub get
-      - name: Build Arm64 APK
+
+      - name: Build Arm64 Full APK
         run: |
           cd app
           flutter build apk --release --flavor arm64 --target-platform android-arm64 --android-skip-build-dependency-validation
-      - name: Upload APK Artifact
+
+      - name: Upload Full 200MB APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dsh-go-tavern-arm64
+          name: dsh-go-tavern-full-arm64
           path: app/build/app/outputs/flutter-apk/*.apk
