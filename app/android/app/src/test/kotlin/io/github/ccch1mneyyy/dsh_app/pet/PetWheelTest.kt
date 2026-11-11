@@ -49,8 +49,8 @@ class PetWheelTest {
             for (i in 0 until count - 1) {
                 val a = g.centers[i]
                 val b = g.centers[i + 1]
-                assertTrue(kotlin.math.abs(a.first - b.first) > g.buttonWidth * 1.1f ||
-                    kotlin.math.abs(a.second - b.second) > g.buttonHeight * 1.1f)
+                // Round buttons: the chosen one grows to 1.24 and its neighbour to about 1.03.
+                assertTrue(kotlin.math.hypot(a.first - b.first, a.second - b.second) > g.buttonWidth * 1.15f)
             }
         }
     }
@@ -120,30 +120,30 @@ class PetWheelTest {
         assertNull(PetWheelGesture(0f, 0f, 10f).finish(false))
     }
 
-    @Test fun onlyStationaryUncancelledFallbackReleaseCanContinueForNativeScrolling() {
+    @Test fun onlyAStationaryUncancelledReleaseLeavesTheMenuOpenForATap() {
         val stationary = PetWheelGesture(10f, 20f, 10f)
         stationary.move(12f, 21f) { 1 }
-        assertTrue(stationary.keepListOpen(false))
+        assertTrue(stationary.staysOpen(false))
         assertNull(stationary.finish(false))
-        assertFalse(stationary.keepListOpen(false))
+        assertFalse(stationary.staysOpen(false))
         val returning = PetWheelGesture(10f, 20f, 10f)
         returning.move(100f, 20f) { 2 }
         returning.move(10f, 20f) { null }
-        assertFalse(returning.keepListOpen(false))
+        assertFalse(returning.staysOpen(false))
         assertNull(returning.finish(false))
         val cancelled = PetWheelGesture(10f, 20f, 10f)
-        assertFalse(cancelled.keepListOpen(true))
+        assertFalse(cancelled.staysOpen(true))
         assertNull(cancelled.finish(true))
     }
 
-    @Test fun captionIsCancelForBothSidesAndEveryMenuSize() {
+    @Test fun backNearThePetIsCancelForBothSidesAndEveryMenuSize() {
         for (count in 5..7) for (side in Side.entries) {
             val g = fit(count, side)
             val pointer = PetWheelGesture(g.centerX, g.centerY, 10f)
             val p = g.centers[1]
             assertEquals(1, pointer.move(p.first, p.second) { g.hit(p.first, p.second) })
-            val captionX = g.centerX + g.direction * g.radius * 0.43f
-            assertNull(pointer.move(captionX, g.centerY) { g.hit(captionX, g.centerY, 1) })
+            val nearX = g.centerX + g.direction * g.dead * 0.9f
+            assertNull(pointer.move(nearX, g.centerY) { g.hit(nearX, g.centerY, 1) })
             assertNull(pointer.finish(false))
         }
     }
@@ -157,6 +157,44 @@ class PetWheelTest {
         assertFalse(g.hitsVisibleRow(g.bounds.left + 30f, g.bounds.top + 65f, 6, 10, 100, 60))
         assertFalse(g.hitsVisibleRow(g.bounds.left + 2f, g.bounds.top + 40f, 6, 10, 100, 60))
         assertFalse(g.hitsVisibleRow(g.bounds.left + 30f, g.bounds.top + 5f, 6, 10, 100, 60))
+    }
+
+    @Test fun theWindowHoldsEveryLabelAndTheFanIsWithinThumbReach() {
+        for (count in 5..7) for (side in Side.entries) {
+            val g = fit(count, side)
+            assertTrue(g.radius <= 140f) // was 172–220: a stretch for a thumb resting on the pet
+            for (i in 0 until count) {
+                // The label's far end along the button's own ray, for a 64px label and the chosen button's growth.
+                val reach = g.radius + g.orb * 1.24f + 9f + 16f + 64f
+                val x = g.centerX + g.direction * reach * cos(g.angle(i)).toFloat()
+                val y = g.centerY + reach * sin(g.angle(i)).toFloat()
+                assertTrue(x >= g.bounds.left && x <= g.bounds.right && y >= g.bounds.top && y <= g.bounds.bottom)
+                assertEquals(i, g.hit(x, y))
+            }
+        }
+    }
+
+    @Test fun aLongerLabelMovesTheFanInwardOrFallsBackToTheList() {
+        val wide = PetWheelGeometry.fit(7, Side.RIGHT, 412f - 30f, 460f, area, 1f, 1f, labelWidth = 140f)
+        assertFalse(wide.list)
+        assertTrue(wide.centerX - (wide.radius + wide.orb * 1.24f + 9f + 24f + 140f) >= area.left)
+        assertTrue(PetWheelGeometry.fit(7, Side.LEFT, 30f, 460f, area, 1f, 1f, labelWidth = 400f).list)
+    }
+
+    @Test fun springSettlesOnItsTargetAtAnyFrameLength() {
+        for (frame in listOf(0.004f, 0.016f, 0.04f)) {
+            val spring = PetSpring(0f, 420f, 30f).apply { target = 1f }
+            var peak = 0f
+            var steps = 0
+            while (spring.step(frame) && steps++ < 400) peak = maxOf(peak, spring.x)
+            assertEquals(1f, spring.x, 0f)
+            assertEquals(0f, spring.velocity, 0f)
+            assertTrue(steps * frame < 0.8f)   // done well inside a second
+            assertTrue(peak in 1f..1.12f)       // a small overshoot, never a bounce
+        }
+        val snapped = PetSpring(0.3f, 420f, 30f).apply { target = 1f }
+        assertFalse(snapped.snap())
+        assertEquals(1f, snapped.x, 0f)
     }
 
     @Test fun producerRotationOrLockInvalidationDoesNotReleaseCaptureVisibilityEarly() {
