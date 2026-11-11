@@ -128,6 +128,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _keyboardInset ??= View.of(context).viewInsets.bottom;
     _interactionRoute = ModalRoute.of<Object?>(context);
     final current = ModalRoute.isCurrentOf(context) ?? true;
     if (current == _routeCurrent) return;
@@ -163,6 +164,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     if (state == AppLifecycleState.resumed) _scheduleInteraction();
   }
 
+  @override
+  void didChangeMetrics() {
+    final inset = View.of(context).viewInsets.bottom;
+    final hidden = (_keyboardInset ?? 0) > 0 && inset == 0;
+    _keyboardInset = inset;
+    if (hidden && (_interactionRoute?.isCurrent ?? true)) _dismissSlashPalette();
+  }
+
   final _input = MentionTextController();
 
   /// The composer as plugin controls and ui.json capsules see it.
@@ -185,6 +194,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// Where [_voice] says it is on, for what waits for a quiet moment.
   late final VoiceInputActiveController _voiceFlag;
   final _focus = FocusNode();
+
+  // A dismissal belongs to this slash draft, until its leading slash is removed.
+  bool _slashDismissed = false;
+  double? _keyboardInset;
+  final _composerGroup = Object();
+
+  void _resetSlashDismissal() {
+    if (parseSlashInput(_input.text) == null) _slashDismissed = false;
+  }
+
+  void _dismissSlashPalette() {
+    if (_slashDismissed || parseSlashInput(_input.text) == null) return;
+    setState(() => _slashDismissed = true);
+  }
+
+  PaletteContent? _slashContent(List<SlashCommand> commands) => _slashDismissed
+      ? null
+      : PaletteContent.of(
+          commands,
+          _input.text,
+          caret: _input.selection.isCollapsed ? _input.selection.extentOffset : -1,
+        );
+
+  KeyEventResult _composerKey(FocusNode node, KeyEvent event) {
+    final mention = _mentions.handleKey(node, event);
+    if (mention != KeyEventResult.ignored) return mention;
+    final composing = _input.value.composing;
+    if (composing.isValid && !composing.isCollapsed) return KeyEventResult.ignored;
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape && _slashContent(_commands) != null) {
+      _dismissSlashPalette();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   /// 底色遮罩的实心高度:页面布局排好输入条时写入(见 [_ChatLayout])。
   final _veilHeight = ValueNotifier<double>(0);
@@ -285,6 +328,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _composerToastWait?.cancel();
     if (_voice.active) unawaited(_voice.cancel());
     _mentions.dismiss();
+    _slashDismissed = false;
     _saveDraft();
     _draftKey = key;
     _spoken = null;
@@ -329,6 +373,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     // Start reading what earlier sessions still owe before the first send.
     ref.read(owedSetupsProvider.notifier);
     _showDraft(ref.read(draftStoreProvider).drafts[_draftKey]);
+    _input.addListener(_resetSlashDismissal);
     _input.addListener(_saveDraft);
     ref.listenManual(currentSessionProvider, (_, next) => _switchDraft(next));
     ref.listenManual(activeConnectionProvider.select((c) => c.value?.client), (_, _) {
@@ -445,6 +490,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _creating = null;
     _syncWait = null;
     _composerToastWait?.cancel();
+    _input.removeListener(_resetSlashDismissal);
     _input.removeListener(_saveDraft);
     _mentions.dispose();
     _voice.removeListener(_reportVoice);
@@ -1299,6 +1345,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// A row picked in the palette: app commands and commands without input run
   /// now; commands that take input go into the composer for the arguments.
   void _pick(SlashCommand command, {bool atCaret = true}) {
+    _dismissSlashPalette();
     final value = _input.value;
     final caret = atCaret && value.selection.isValid ? value.selection.end : value.text.length;
     final leading = value.text.length - value.text.trimLeft().length;
@@ -1828,37 +1875,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                             // The `@` word at the caret wins over a "/" line.
                             final live = connected && !readOnly;
                             final mention = live && _mentions.isOpen;
-                            final content = live && !mention
-                                ? PaletteContent.of(
-                                    commands,
-                                    _input.text,
-                                    caret: _input.selection.isCollapsed ? _input.selection.extentOffset : -1,
-                                  )
-                                : null;
+                            final content = live && !mention ? _slashContent(commands) : null;
                             // The pet steps aside while a panel is up.
-                            return PetCover(
-                              active: mention || content != null,
-                              child: AnimatedSwitcher(
-                                duration: AppMotion.of(context, AppMotion.quick),
-                                switchInCurve: AppMotion.enter,
-                                switchOutCurve: AppMotion.exit,
-                                transitionBuilder: (child, animation) => FadeTransition(
-                                  opacity: animation,
-                                  child: ScaleTransition(
-                                    alignment: Alignment.bottomCenter,
-                                    scale: Tween(begin: 0.96, end: 1.0).animate(animation),
-                                    child: child,
+                            return PopScope<Object?>(
+                              canPop: content == null,
+                              onPopInvokedWithResult: (didPop, _) {
+                                if (!didPop) _dismissSlashPalette();
+                              },
+                              child: PetCover(
+                                active: mention || content != null,
+                                child: AnimatedSwitcher(
+                                  duration: AppMotion.of(context, AppMotion.quick),
+                                  switchInCurve: AppMotion.enter,
+                                  switchOutCurve: AppMotion.exit,
+                                  transitionBuilder: (child, animation) => FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      alignment: Alignment.bottomCenter,
+                                      scale: Tween(begin: 0.96, end: 1.0).animate(animation),
+                                      child: child,
+                                    ),
                                   ),
+                                  child: mention
+                                      ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
+                                      : content == null
+                                      ? const SizedBox(key: ValueKey('none'), width: double.infinity)
+                                      : TextFieldTapRegion(
+                                          key: ValueKey(content is PaletteHint),
+                                          groupId: _composerGroup,
+                                          onTapOutside: (_) => _dismissSlashPalette(),
+                                          child: SlashPalette(content: content, onPick: _pick),
+                                        ),
                                 ),
-                                child: mention
-                                    ? MentionPicker(key: const ValueKey('mention'), controller: _mentions)
-                                    : content == null
-                                    ? const SizedBox(key: ValueKey('none'), width: double.infinity)
-                                    : SlashPalette(
-                                        key: ValueKey(content is PaletteHint),
-                                        content: content,
-                                        onPick: _pick,
-                                      ),
                               ),
                             );
                           },
@@ -2034,6 +2082,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                   Composer(
                                     hardwareEnterSends: ref.watch(settingsProvider.select((s) => s.hardwareEnterSends)),
                                     controller: _input,
+                                    groupId: _composerGroup,
                                     // The page's context: Scaffold drops the keyboard inset below.
                                     maxLines: Composer.linesFor(context),
                                     focusNode: _focus,
@@ -2068,7 +2117,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                     onSend: _send,
                                     onSendOptions: chat?.controlReady ?? true ? _sendOptions : null,
                                     voice: _voice,
-                                    onKeyEvent: _mentions.handleKey,
+                                    onKeyEvent: _composerKey,
                                     onContentInserted: connected ? _pasteContent : null,
                                     onStop: _stop,
                                     hasAttachments: _drafts.isNotEmpty,
