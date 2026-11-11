@@ -174,6 +174,30 @@ class PetWheelTest {
         }
     }
 
+    @Test fun aTapOnTheOpenFanOnlyCountsOnAButtonOrItsLabel() {
+        for (count in 5..7) for (side in Side.entries) {
+            val g = fit(count, side)
+            for (i in 0 until count) {
+                val ux = g.direction * cos(g.angle(i)).toFloat()
+                val uy = sin(g.angle(i)).toFloat()
+                fun at(distance: Float) = g.tap(g.centerX + distance * ux, g.centerY + distance * uy) { 40f }
+                assertEquals(i, at(g.radius))                      // the button
+                assertEquals(i, at(g.radius + g.orb + 30f))         // its label
+                // The mist between the pet and the button, and past the label: a slide still
+                // picks the sector there, a tap does not.
+                val inner = (g.dead + g.radius - 31f) / 2
+                assertEquals(i, g.hit(g.centerX + inner * ux, g.centerY + inner * uy))
+                assertNull(at(inner))
+                val beyond = g.radius + g.orb + 24f + 40f + 6f
+                assertEquals(i, g.hit(g.centerX + beyond * ux, g.centerY + beyond * uy))
+                assertNull(at(beyond))
+            }
+            // Inside the ring between two neighbours, off both buttons.
+            val mid = (g.angle(0) + g.angle(1)) / 2
+            assertNull(g.tap(g.centerX + g.direction * (g.radius - 40f) * cos(mid).toFloat(), g.centerY + (g.radius - 40f) * sin(mid).toFloat()) { 40f })
+        }
+    }
+
     @Test fun aLongerLabelMovesTheFanInwardOrFallsBackToTheList() {
         val wide = PetWheelGeometry.fit(7, Side.RIGHT, 412f - 30f, 460f, area, 1f, 1f, labelWidth = 140f)
         assertFalse(wide.list)

@@ -294,8 +294,9 @@ internal class PetMenuView(
         wake()
     }
 
-    // The open fan takes its own touches whole: a tap on a button runs it, a press may still
-    // slide to another, anything else closes. The list keeps native clicks and scrolling.
+    // The open fan takes its own touches whole: a press on a button or its label picks it and
+    // may still slide to another; a press anywhere else, or a second finger, closes without
+    // running anything. The list keeps native clicks and scrolling.
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean = geometry?.list == false
 
     @SuppressLint("ClickableViewAccessibility")
@@ -305,6 +306,14 @@ internal class PetMenuView(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 selection = null
+                val pressed = g.tap(event.rawX, event.rawY) { i ->
+                    val a = g.angle(i)
+                    abs(cos(a).toFloat()) * labelW[i] + abs(sin(a).toFloat()) * labelPaint.textSize + 16f * g.density
+                }
+                if (pressed == null) {
+                    onOutside()
+                    return true
+                }
                 ownStream = true
                 gesture = PetWheelGesture(g.centerX, g.centerY, context.dp(10f).toFloat())
                 pointing = true
@@ -312,7 +321,7 @@ internal class PetMenuView(
             }
             MotionEvent.ACTION_MOVE -> movePointer(event.rawX, event.rawY)
             MotionEvent.ACTION_UP -> endPointer(event.rawX, event.rawY, false)
-            MotionEvent.ACTION_CANCEL -> endPointer(event.rawX, event.rawY, true)
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> endPointer(event.rawX, event.rawY, true)
         }
         return true
     }

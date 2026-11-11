@@ -54,6 +54,22 @@ internal class PetWheelGeometry private constructor(
         return ((theta + PI / 2) / step).toInt().coerceIn(0, centers.lastIndex)
     }
 
+    /**
+     * A tap on the fan left open: only a button or its label counts, not the whole sector a slide
+     * may pick from, so a touch on the empty mist closes the menu instead of running something.
+     * [labelSpan] is how far button [it]'s label reaches along its own ray.
+     */
+    fun tap(x: Float, y: Float, labelSpan: (Int) -> Float): Int? {
+        val index = hit(x, y) ?: return null
+        val a = angle(index)
+        val ux = direction * cos(a).toFloat()
+        val uy = sin(a).toFloat()
+        val along = (x - centerX) * ux + (y - centerY) * uy
+        val across = abs((x - centerX) * uy - (y - centerY) * ux)
+        val half = 31f * density // half the arc one button owns
+        return index.takeIf { across <= half && along >= radius - half && along <= radius + orb + 24f * density + labelSpan(index) }
+    }
+
     companion object {
         /** [labelWidth]: the widest short label as drawn, in pixels. */
         fun fit(
