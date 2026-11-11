@@ -16,6 +16,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   final List<String> _scanDirectories = [
     '/sdcard/Download',
     '/sdcard/Download/st',
+    '/sdcard/Download/st/cards',
     '/sdcard/Download/Browser',
     '/sdcard/Documents',
   ];
@@ -176,6 +177,22 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 新建角色卡（酒馆式编辑表单）
+        Card(
+          color: Colors.green.withOpacity(0.06),
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: Colors.green.withOpacity(0.5), width: 1.2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ListTile(
+            leading: const Icon(Icons.person_add_alt_1, color: Colors.green, size: 30),
+            title: const Text('新建角色卡', style: TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('像酒馆一样自己填人设、性格、场景、开场白，保存为标准 spec_v2 卡'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+            onTap: () => _openCardEditor(null),
+          ),
+        ),
+        const SizedBox(height: 8),
         // 顶部当前装配生效卡片
         Card(
           color: _activeCardPath != null ? Colors.blue.withOpacity(0.08) : null,
@@ -343,6 +360,94 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       }
     });
     _saveConfig();
+    _syncAgentPreset();
+  }
+
+  /// 把当前装配的角色卡写成官方 Agent 预设（与「伙伴·完整」同一机制），
+  /// 注入宿主 rootfs 的 dsh-web.patch.yml。新对话里直接选这个预设 = 官方
+  /// 原生链路的角色卡聊天。卸下角色卡时同步移除该预设。
+  void _syncAgentPreset() {
+    try {
+      const patchPath = '/data/user/0/io.github.ccch1mneyyy.dsh_app/files/runtime/rootfs/etc/dsh-app/dsh-web.patch.yml';
+      final f = File(patchPath);
+      if (!f.existsSync()) return;
+      var text = f.readAsStringSync();
+      // 移除旧的酒馆预设块（从标记行到下一个 "- insert:" 或文件尾）
+      final marker = '    # TAVERN_CARD_PRESET_BEGIN';
+      if (text.contains(marker)) {
+        final endMarker = '    # TAVERN_CARD_PRESET_END';
+        final startIdx = text.indexOf(marker);
+        final endIdx = text.indexOf(endMarker);
+        if (startIdx != -1 && endIdx != -1) {
+          text = text.substring(0, startIdx) + text.substring(endIdx + endMarker.length);
+          // 清理可能残留的空行
+          text = text.replaceAll('\n\n\n', '\n\n');
+        }
+      }
+      if (_activeCardPath == null) {
+        f.writeAsStringSync(text);
+        return;
+      }
+      // 读取角色卡人设字段
+      final cardFile = File(_activeCardPath!);
+      final card = json.decode(cardFile.readAsStringSync()) as Map<String, dynamic>;
+      final data = (card['data'] is Map) ? card['data'] as Map<String, dynamic> : card;
+      final name = (data['name'] ?? _activeCardName ?? '角色').toString();
+      final desc = (data['description'] ?? '').toString();
+      final personality = (data['personality'] ?? '').toString();
+      final scenario = (data['scenario'] ?? '').toString();
+      final firstMes = (data['first_mes'] ?? '').toString();
+
+      final promptLines = <String>[
+        '你是「$name」。请完全沉浸在角色扮演中，始终以 $name 的身份与用户对话。',
+        if (desc.isNotEmpty) ...['', '【角色设定】', desc],
+        if (personality.isNotEmpty) ...['', '【性格特征】', personality],
+        if (scenario.isNotEmpty) ...['', '【当前场景】', scenario],
+        if (firstMes.isNotEmpty) ...['', '【开场白参考】', firstMes],
+        '',
+        '【扮演规则】',
+        '- 永远保持 $name 的身份、语气和性格，不要跳出角色。',
+        '- 说话自然生动，符合角色人设，不要使用助手式的口吻。',
+        '- 不讨论扮演本身，除非用户明确要求。',
+      ];
+      final prefix = promptLines.join('\n');
+      // YAML 块标量：每行缩进 16 格（patch 内 persona.prefix 层级）
+      final yamlPrefix = prefix.split('\n').map((l) => l.isEmpty ? '' : '                $l').join('\n');
+
+      final block = [
+        marker,
+        '    # 由酒馆设定页自动生成：当前装配角色卡 → 官方 Agent 预设',
+        '    - id: preset-tavern-card',
+        "      name: '@deepseek-ai/dsh-agent-preset'",
+        '      config:',
+        '        id: tavern-card',
+        '        name: 酒馆·$name',
+        '        description: 角色卡扮演：$name。只有人设，没有工具。',
+        '        order: 92',
+        '        plugins:',
+        '          - id: persona',
+        "            name: '@deepseek-ai/dsh-persona'",
+        '            config:',
+        '              complete: true',
+        '              includeRuntimeContext: false',
+        '              prefix: |-$yamlPrefix',
+        '          - id: compaction',
+        '            name: cordis:group',
+        '            group: true',
+        '            isolate:',
+        '              compaction: true',
+        '            config:',
+        '              - id: compaction-basic',
+        "                name: '@deepseek-ai/dsh-compaction-basic'",
+        '              - id: command-compact',
+        "                name: '@deepseek-ai/dsh-command-compact'",
+        endMarker,
+      ].join('\n');
+      text = '$text\n$block\n';
+      f.writeAsStringSync(text);
+    } catch (_) {
+      // 预设注入失败不影响装配本身
+    }
   }
 
   void _openCardDetail(String path) {
@@ -1232,4 +1337,123 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
       ),
     );
   }
+  // ================= 酒馆式角色卡新建 / 编辑 =================
+  static const _cardsDir = '/sdcard/Download/st/cards';
+  void _openCardEditor(String? editPath) {
+    Map<String, dynamic> cardData = {};
+    if (editPath != null) {
+      try {
+        final d = json.decode(File(editPath).readAsStringSync());
+        cardData = Map<String, dynamic>.from((d['data'] is Map) ? d['data'] : d);
+      } catch (_) {}
+    }
+    final nameCtrl = TextEditingController(text: cardData['name']?.toString() ?? '');
+    final descCtrl = TextEditingController(text: cardData['description']?.toString() ?? '');
+    final personalityCtrl = TextEditingController(text: cardData['personality']?.toString() ?? '');
+    final scenarioCtrl = TextEditingController(text: cardData['scenario']?.toString() ?? '');
+    final firstMesCtrl = TextEditingController(text: cardData['first_mes']?.toString() ?? '');
+    final mesExampleCtrl = TextEditingController(text: cardData['mes_example']?.toString() ?? '');
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.92,
+          maxChildSize: 0.95,
+          builder: (ctx, scrollCtrl) => Scaffold(
+            appBar: AppBar(
+              title: Text(editPath == null ? '新建角色卡' : '编辑角色卡'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    if (nameCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('角色名不能为空')));
+                      return;
+                    }
+                    final name = nameCtrl.text.trim();
+                    final spec = {
+                      'spec': 'chara_card_v2',
+                      'spec_version': '2.0',
+                      'data': {
+                        'name': name,
+                        'description': descCtrl.text.trim(),
+                        'personality': personalityCtrl.text.trim(),
+                        'scenario': scenarioCtrl.text.trim(),
+                        'first_mes': firstMesCtrl.text.trim(),
+                        'mes_example': mesExampleCtrl.text.trim(),
+                        'character_book': {
+                          'entries': (cardData['character_book'] is Map &&
+                                  (cardData['character_book'] as Map)['entries'] is List)
+                              ? (cardData['character_book'] as Map)['entries']
+                              : [],
+                        },
+                      },
+                    };
+                    try {
+                      Directory(_cardsDir).createSync(recursive: true);
+                      final safe = name.replaceAll(RegExp(r'\w\u4e00-\u9fa5-'), '_');
+                      final outPath = editPath ?? '$_cardsDir/$safe_spec_v2.json';
+                      File(outPath).writeAsStringSync(const JsonEncoder.withIndent('  ').convert(spec));
+                      if (mounted) Navigator.pop(ctx);
+                      _scanFiles();
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('角色卡「$name」已保存！')));
+                    } catch (e) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('保存失败: $e')));
+                    }
+                  },
+                  child: const Text('保存', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            body: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.all(16),
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: '角色名 *', border: OutlineInputBorder(), hintText: '例如：曜'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: descCtrl,
+                  maxLines: 6,
+                  decoration: const InputDecoration(labelText: '角色设定（背景、身份、外貌等）', alignLabelWithHint: true, border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: personalityCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: '性格特征', alignLabelWithHint: true, border: OutlineInputBorder(), hintText: '例如：冷静、话少、外冷内热'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: scenarioCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(labelText: '当前场景', alignLabelWithHint: true, border: OutlineInputBorder(), hintText: '例如：深夜的观测站，两人刚刚汇合'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: firstMesCtrl,
+                  maxLines: 6,
+                  decoration: const InputDecoration(labelText: '开场白（First Message）', alignLabelWithHint: true, border: OutlineInputBorder(), hintText: '角色的第一句话，决定整个对话的基调'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: mesExampleCtrl,
+                  maxLines: 4,
+                  decoration: const InputDecoration(labelText: '对话示例（可选）', alignLabelWithHint: true, border: OutlineInputBorder()),
+                ),
+                const SizedBox(height: 16),
+                Text('提示：编辑已有角色卡时，其内嵌世界书词条会原样保留。', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
 }
