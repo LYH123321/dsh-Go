@@ -213,6 +213,9 @@ class PetWheelTest {
         // The window and the mist behind it reach past the long label too, so it is not clipped.
         assertTrue(wide.bounds.left <= labelEnd)
         assertTrue(wide.mist >= wide.centerX - labelEnd + 32f)
+        // Sliding out to the far end of that label still picks its button.
+        assertEquals(3, wide.hit(labelEnd + 4f, wide.centerY))
+        assertNull(wide.hit(wide.centerX - wide.limit - 4f, wide.centerY))
         assertTrue(PetWheelGeometry.fit(7, Side.LEFT, 30f, 460f, area, 1f, 1f, labelWidth = 400f).list)
     }
 

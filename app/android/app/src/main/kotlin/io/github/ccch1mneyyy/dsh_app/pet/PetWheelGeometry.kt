@@ -36,8 +36,8 @@ internal class PetWheelGeometry private constructor(
     /** Nearer the pet than this is "back on the pet": nothing is chosen, releasing cancels. */
     val dead: Float get() = maxOf(52f * density, radius * 0.5f)
 
-    /** Past the labels the finger has left the wheel. */
-    val limit: Float get() = radius + orb + 96f * density
+    /** Past the longest label the finger has left the wheel. */
+    val limit: Float get() = maxOf(radius + orb + 96f * density, mist - 24f * density)
 
     fun angle(index: Int): Double = -PI / 2 + (index + 0.5) * step
 
