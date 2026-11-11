@@ -130,12 +130,12 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
               itemBuilder: (ctx, idx) {
                 final e = entries[idx];
                 final bool isConstant = e['constant'] == true;
-                final bool isEnabled = e['enabled'] != false;
-                final keys = (e['key'] is List) ? (e['key'] as List).join(', ') : (e['key'] ?? '');
+                final keys = (e['key'] is List) ? (e['key'] as List).join(', ') : (e['key']?.toString() ?? '');
+                final content = e['content']?.toString() ?? '';
 
                 return ListTile(
-                  title: Text(e['comment'] ?? '未命名条目', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  title: Text(e['comment']?.toString() ?? '未命名条目', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: Text('触发词: $keys | $content', maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: Switch(
                     value: isConstant,
                     onChanged: (val) {
@@ -168,7 +168,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 child: ListTile(
                   leading: const Icon(Icons.menu_book),
                   title: Text(f.path.split('/').last),
-                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(f.path),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _openBook(f.path),
                 ),
@@ -178,9 +178,9 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   }
 
   void _editEntryDialog(Map<String, dynamic> entry) {
-    final titleCtrl = TextEditingController(text: entry['comment'] ?? '');
-    final keysCtrl = TextEditingController(text: (entry['key'] is List) ? (entry['key'] as List).join(', ') : (entry['key'] ?? ''));
-    final contentCtrl = TextEditingController(text: entry['content'] ?? '');
+    final titleCtrl = TextEditingController(text: entry['comment']?.toString() ?? '');
+    final keysCtrl = TextEditingController(text: (entry['key'] is List) ? (entry['key'] as List).join(', ') : (entry['key']?.toString() ?? ''));
+    final contentCtrl = TextEditingController(text: entry['content']?.toString() ?? '');
 
     showDialog(
       context: context,
@@ -235,7 +235,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 ),
                 ListTile(
                   title: const Text('单轮最多导入条目数'),
-                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('$_maxEntries 条 (推荐 3~5 条)'),
                   trailing: SizedBox(
                     width: 120,
                     child: Slider(
@@ -249,7 +249,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 ),
                 ListTile(
                   title: const Text('单轮最大注入字符数'),
-                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('$_maxChars 字 (硬锁杜绝网关413超额)'),
                   trailing: SizedBox(
                     width: 120,
                     child: Slider(
