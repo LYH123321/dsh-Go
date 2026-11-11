@@ -13,7 +13,6 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   late TabController _tabController;
   final String _configPath = '/sdcard/Download/st/tavern_config.json';
   
-  // 常用目录，覆盖系统下载、浏览器下载、ST数据目录等
   final List<String> _scanDirectories = [
     '/sdcard/Download',
     '/sdcard/Download/st',
@@ -24,6 +23,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   List<FileSystemEntity> _bookFiles = [];
   Map<String, dynamic>? _currentBook;
   String? _currentBookPath;
+  String? _activeBookPath; // 当前激活生效的世界书路径
   
   // 自导入与硬锁设置
   int _maxEntries = 4;
@@ -50,6 +50,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           _maxEntries = data['max_entries'] ?? 4;
           _maxChars = data['max_chars'] ?? 2500;
           _enableAutoImport = data['enable_auto_import'] ?? true;
+          _activeBookPath = data['active_book_path'];
           if (data['regex_presets'] is List) {
             _regexPresets = List<Map<String, dynamic>>.from(data['regex_presets']);
           }
@@ -58,19 +59,24 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     } catch (_) {}
   }
 
-  void _saveConfig() {
+  void _saveConfig({bool notify = true}) {
     try {
       final f = File(_configPath);
       final data = {
         'max_entries': _maxEntries,
         'max_chars': _maxChars,
         'enable_auto_import': _enableAutoImport,
+        'active_book_path': _activeBookPath,
         'regex_presets': _regexPresets,
       };
       f.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(data));
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('配置已保存！')));
+      if (notify && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('配置已保存生效！')));
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存配置失败: $e')));
+      if (notify && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存配置失败: $e')));
+      }
     }
   }
 
@@ -180,6 +186,51 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     }
   }
 
+  void _toggleActiveBook(String path) {
+    setState(() {
+      if (_activeBookPath == path) {
+        _activeBookPath = null; // 取消激活
+      } else {
+        _activeBookPath = path; // 设为当前激活
+      }
+    });
+    _saveConfig();
+  }
+
+  void _deleteBookFile(String path) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除文件？'),
+        content: Text('即将从本地存储彻底删除：\n$path'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () {
+              Navigator.pop(ctx);
+              try {
+                final f = File(path);
+                if (f.existsSync()) {
+                  f.deleteSync();
+                }
+                if (_activeBookPath == path) {
+                  _activeBookPath = null;
+                  _saveConfig(notify: false);
+                }
+                _scanWorldBooks();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('文件已删除')));
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+              }
+            },
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -215,10 +266,12 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         entries = entriesRaw.values.toList();
       }
 
+      final isBookActive = _activeBookPath == _currentBookPath;
+
       return Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             child: Row(
               children: [
@@ -227,17 +280,45 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                   onPressed: () => setState(() => _currentBook = null),
                 ),
                 Expanded(
-                  child: Text(
-                    '${_currentBookPath?.split('/').last} (${entries.length} 条)',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_currentBookPath?.split('/').last}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        '共 ${entries.length} 条条目 | 状态: ${isBookActive ? "【当前已装载生效】" : "【未装载】"}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isBookActive ? Colors.green : Colors.grey,
+                          fontWeight: isBookActive ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                FilledButton.tonal(
+                  onPressed: () => _toggleActiveBook(_currentBookPath!),
+                  child: Text(isBookActive ? '卸载' : '装载生效'),
+                ),
+                const SizedBox(width: 8),
                 FilledButton.icon(
                   icon: const Icon(Icons.save, size: 18),
                   label: const Text('保存'),
                   onPressed: _saveCurrentBook,
                 ),
               ],
+            ),
+          ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
+            child: const Text(
+              '说明：右侧开关开启 = 【常驻注入】（每轮强制塞入Prompt）；关闭 = 【触发词动态注入】（当对话命中关键词时才载入，不命中则不载入）。若整条不需要，可清空触发词。',
+              style: TextStyle(fontSize: 12, color: Colors.black87),
             ),
           ),
           Expanded(
@@ -251,8 +332,23 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 final content = e['content']?.toString() ?? '';
 
                 return ListTile(
-                  title: Text(e['comment']?.toString() ?? '未命名条目', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('触发词: $keys | $content', maxLines: 2, overflow: TextOverflow.ellipsis),
+                  title: Row(
+                    children: [
+                      Expanded(child: Text(e['comment']?.toString() ?? '未命名条目', style: const TextStyle(fontWeight: FontWeight.bold))),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isConstant ? Colors.blue.withOpacity(0.15) : Colors.grey.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          isConstant ? '常驻注入' : '关键词触发',
+                          style: TextStyle(fontSize: 11, color: isConstant ? Colors.blue[800] : Colors.grey[700]),
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text('触发词: ${keys.isEmpty ? "(无)" : keys}\n$content', maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: Switch(
                     value: isConstant,
                     onChanged: (val) {
@@ -273,6 +369,49 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 顶部展示当前装载的世界书状态
+        Card(
+          color: _activeBookPath != null ? Colors.green.withOpacity(0.08) : null,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: _activeBookPath != null ? Colors.green : Colors.transparent, width: 1.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(
+                  _activeBookPath != null ? Icons.check_circle : Icons.info_outline,
+                  color: _activeBookPath != null ? Colors.green : Colors.grey,
+                  size: 32,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _activeBookPath != null ? '当前装载生效中：' : '当前未装载任何世界书',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _activeBookPath != null ? _activeBookPath!.split('/').last : '请在下方列表中选择一本点击「装载」，或点击路径导入',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_activeBookPath != null)
+                  FilledButton.tonal(
+                    onPressed: () => _toggleActiveBook(_activeBookPath!),
+                    child: const Text('卸载'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -291,7 +430,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           ],
         ),
         const SizedBox(height: 16),
-        const Text('手机扫描到的世界书与角色卡：', style: TextStyle(fontWeight: FontWeight.bold)),
+        const Text('手机扫描到的世界书与角色卡列表：', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 8),
         if (_bookFiles.isEmpty)
           const Padding(
@@ -299,15 +438,39 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
             child: Center(child: Text('未扫描到世界书，可点击上方「自定义路径导入」直接加载')),
           )
         else
-          ..._bookFiles.map((f) => Card(
-                child: ListTile(
-                  leading: const Icon(Icons.menu_book),
-                  title: Text(f.path.split('/').last),
-                  subtitle: Text(f.path),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => _openBook(f.path),
+          ..._bookFiles.map((f) {
+            final isActive = _activeBookPath == f.path;
+            return Card(
+              elevation: isActive ? 2 : 1,
+              child: ListTile(
+                leading: Icon(Icons.menu_book, color: isActive ? Colors.green : null),
+                title: Text(
+                  f.path.split('/').last,
+                  style: TextStyle(fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
                 ),
-              )),
+                subtitle: Text(isActive ? '【当前使用中】' : f.path),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton.tonal(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isActive ? Colors.green.withOpacity(0.15) : null,
+                        foregroundColor: isActive ? Colors.green[800] : null,
+                      ),
+                      onPressed: () => _toggleActiveBook(f.path),
+                      child: Text(isActive ? '使用中' : '装载'),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                      tooltip: '删除此文件',
+                      onPressed: () => _deleteBookFile(f.path),
+                    ),
+                  ],
+                ),
+                onTap: () => _openBook(f.path),
+              ),
+            );
+          }),
       ],
     );
   }
@@ -390,7 +553,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
                 ),
                 ListTile(
                   title: const Text('单轮最大注入字符数'),
-                  subtitle: Text('$_maxChars 字 (硬锁杜绝超额)'),
+                  subtitle: Text('$_maxChars 字 (硬锁杜绝网关413超额)'),
                   trailing: SizedBox(
                     width: 120,
                     child: Slider(
@@ -422,14 +585,20 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
             Expanded(
               child: FilledButton.icon(
                 icon: const Icon(Icons.add),
-                label: const Text('新建预设正则'),
+                label: const Text('新建规则'),
                 onPressed: _addNewRegexDialog,
               ),
             ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
+              icon: const Icon(Icons.document_scanner),
+              tooltip: '自动扫描手机正则文件导入',
+              onPressed: _scanAndImportRegexFiles,
+            ),
+            const SizedBox(width: 4),
+            IconButton.filledTonal(
               icon: const Icon(Icons.paste),
-              tooltip: '从剪贴板/JSON文本批量导入',
+              tooltip: '粘贴JSON文本导入',
               onPressed: _importRegexFromTextDialog,
             ),
           ],
@@ -438,7 +607,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         if (_regexPresets.isEmpty)
           const Padding(
             padding: EdgeInsets.all(24.0),
-            child: Center(child: Text('当前暂无正则预设规则')),
+            child: Center(child: Text('当前暂无正则预设规则，可点击上方「扫描导入」或「新建」')),
           )
         else
           ..._regexPresets.asMap().entries.map((entry) {
@@ -479,6 +648,103 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
           }),
       ],
     );
+  }
+
+  void _scanAndImportRegexFiles() {
+    final List<File> candidates = [];
+    for (final dirPath in _scanDirectories) {
+      final dir = Directory(dirPath);
+      if (dir.existsSync()) {
+        try {
+          final list = dir.listSync();
+          for (final f in list) {
+            if (f is File && f.path.endsWith('.json')) {
+              final lower = f.path.toLowerCase();
+              if (lower.contains('regex') || lower.contains('rule') || lower.contains('filter')) {
+                candidates.add(f);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('未在常用目录扫描到含 regex 命名的 JSON 规则文件')));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择扫描到的正则文件导入'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: candidates.length,
+            itemBuilder: (c, i) {
+              final file = candidates[i];
+              return ListTile(
+                leading: const Icon(Icons.receipt_long),
+                title: Text(file.path.split('/').last),
+                subtitle: Text(file.path),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _importRegexFromFile(file.path);
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+        ],
+      ),
+    );
+  }
+
+  void _importRegexFromFile(String path) {
+    try {
+      final f = File(path);
+      final raw = f.readAsStringSync();
+      final decoded = json.decode(raw);
+      List<dynamic> list = [];
+      if (decoded is List) {
+        list = decoded;
+      } else if (decoded is Map && decoded.containsKey('regex_presets')) {
+        list = decoded['regex_presets'];
+      } else if (decoded is Map && decoded.containsKey('rules')) {
+        list = decoded['rules'];
+      }
+
+      int count = 0;
+      for (final it in list) {
+        if (it is Map) {
+          final name = it['name'] ?? it['comment'] ?? '导入规则';
+          final pattern = it['pattern'] ?? it['regex'] ?? it['findRegex'];
+          final replacement = it['replacement'] ?? it['replaceString'] ?? '';
+          if (pattern != null && pattern.toString().isNotEmpty) {
+            _regexPresets.add({
+              'name': name.toString(),
+              'pattern': pattern.toString(),
+              'replacement': replacement.toString(),
+              'enabled': true,
+            });
+            count++;
+          }
+        }
+      }
+
+      if (count > 0) {
+        _saveConfig();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('成功从文件导入 $count 条正则规则！')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('文件中未找到有效的正则格式 (需含 pattern 或 regex 字段)')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('解析文件失败: $e')));
+    }
   }
 
   void _addNewRegexDialog() {
