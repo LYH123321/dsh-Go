@@ -135,8 +135,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
 
                 return ListTile(
                   title: Text(e['comment'] ?? '未命名条目', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('触发词: $keys
-${e['content'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: Switch(
                     value: isConstant,
                     onChanged: (val) {
@@ -169,7 +168,7 @@ ${e['content'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis),
                 child: ListTile(
                   leading: const Icon(Icons.menu_book),
                   title: Text(f.path.split('/').last),
-                  subtitle: Text(f.path),
+                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _openBook(f.path),
                 ),
@@ -236,7 +235,7 @@ ${e['content'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis),
                 ),
                 ListTile(
                   title: const Text('单轮最多导入条目数'),
-                  subtitle: Text('$_maxEntries 条 (推荐 3~5 条)'),
+                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: SizedBox(
                     width: 120,
                     child: Slider(
@@ -250,7 +249,7 @@ ${e['content'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis),
                 ),
                 ListTile(
                   title: const Text('单轮最大注入字符数'),
-                  subtitle: Text('$_maxChars 字 (硬锁杜绝网关413超额)'),
+                  subtitle: Text('触发词: ' + keys.toString() + ' | ' + (e['content']?.toString() ?? ''), maxLines: 2, overflow: TextOverflow.ellipsis),
                   trailing: SizedBox(
                     width: 120,
                     child: Slider(
