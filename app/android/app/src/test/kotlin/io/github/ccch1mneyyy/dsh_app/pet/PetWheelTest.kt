@@ -205,6 +205,27 @@ class PetWheelTest {
         }
     }
 
+    @Test fun aTapOnALabelRunsThatButtonEvenWhereTheLabelReachesIntoTheNextSector() {
+        val g = fit(7, Side.LEFT)
+        // The first button's label is a wide horizontal box above it; its right end lies in
+        // the second button's sector.
+        val lead = g.radius + g.orb + 9f + kotlin.math.abs(cos(g.angle(0)).toFloat()) * 70f + kotlin.math.abs(sin(g.angle(0)).toFloat()) * 11f * 0.75f
+        val x = g.centerX + lead * cos(g.angle(0)).toFloat() + 60f
+        val y = g.centerY + lead * sin(g.angle(0)).toFloat()
+        assertEquals(0, g.tap(x, y, 11f) { 140f })
+        assertEquals(1, g.hit(x, y))
+        val tap = PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }
+        assertEquals(0, tap.move(x, y) { g.hit(x, y) })
+        assertEquals(0, tap.move(x + 6f, y - 4f) { g.hit(x + 6f, y - 4f) }) // a finger's wobble
+        assertEquals(0, tap.finish(false))
+        // Sliding off the spot goes back to picking by sector, for good.
+        val slide = PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }
+        val p = g.centers[3]
+        assertEquals(3, slide.move(p.first, p.second) { g.hit(p.first, p.second) })
+        assertEquals(1, slide.move(x, y) { g.hit(x, y) })
+        assertNull(PetWheelGesture(g.centerX, g.centerY, 10f).apply { pin(0, x, y) }.finish(true))
+    }
+
     @Test fun aLongerLabelMovesTheFanInwardOrFallsBackToTheList() {
         val wide = PetWheelGeometry.fit(7, Side.RIGHT, 412f - 30f, 460f, area, 1f, 1f, labelWidth = 140f)
         assertFalse(wide.list)

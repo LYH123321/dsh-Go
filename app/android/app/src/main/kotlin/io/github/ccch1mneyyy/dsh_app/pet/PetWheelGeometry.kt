@@ -135,9 +135,28 @@ internal class PetWheelGesture(private val originX: Float, private val originY: 
     var selected: Int? = null
         private set
     private var ended = false
+    private var pinned = false
+    private var pinX = 0f
+    private var pinY = 0f
+
+    /**
+     * A tap on the open fan landed on [index]'s button or label. A label can reach into the
+     * neighbouring sector, so that stays the choice until the finger slides off the spot; only
+     * then does the sector under it decide.
+     */
+    fun pin(index: Int, x: Float, y: Float) {
+        pinned = true
+        pinX = x
+        pinY = y
+        selected = index
+    }
 
     fun move(x: Float, y: Float, hit: () -> Int?): Int? {
         if (ended) return null
+        if (pinned) {
+            if (hypot(x - pinX, y - pinY) <= slop) return selected
+            pinned = false
+        }
         val distance = hypot(x - originX, y - originY)
         if (distance > slop) moved = true
         selected = if (distance < slop * 2) null else hit()

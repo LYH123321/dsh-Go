@@ -312,7 +312,7 @@ internal class PetMenuView(
                     return true
                 }
                 ownStream = true
-                gesture = PetWheelGesture(g.centerX, g.centerY, context.dp(10f).toFloat())
+                gesture = PetWheelGesture(g.centerX, g.centerY, context.dp(10f).toFloat()).also { it.pin(pressed, event.rawX, event.rawY) }
                 pointing = true
                 movePointer(event.rawX, event.rawY)
             }
