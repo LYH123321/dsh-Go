@@ -200,9 +200,9 @@ class SettingsScreen extends ConsumerWidget {
               onTap: () => _push(context, const PluginsScreen()),
             ),
             SettingsTile(
-              icon: AppIcons.documents,
+              icon: AppIcons.plugin,
               tint: SettingsHues.abilities,
-              spot: const SettingsSpot('tavern_settings', '酒馆设定与自导入'),
+              spot: Spots.community,
               value: text('世界书/自导入'),
               onTap: () => _push(context, const TavernSettingsPage()),
             ),
