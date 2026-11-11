@@ -71,6 +71,13 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
             _regexPresets = List<Map<String, dynamic>>.from(data['regex_presets']);
           }
         });
+        // 启动时自动同步：把已装配角色卡写回宿主 Agent 预设
+        // （覆盖安装/重装后 App 数据目录被清，必须补写）
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _activeCardPath != null && File(_activeCardPath!).existsSync()) {
+            _syncAgentPreset();
+          }
+        });
       }
     } catch (_) {}
   }
@@ -367,20 +374,24 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
   /// 注入宿主 rootfs 的 dsh-web.patch.yml。新对话里直接选这个预设 = 官方
   /// 原生链路的角色卡聊天。卸下角色卡时同步移除该预设。
   void _syncAgentPreset() {
+    // 安全注入策略：
+    // 1) 所有动态字符串经 jsonEncode 转义后以 YAML 双引号标量写入（JSON 字符串是合法 YAML），
+    //    彻底杜绝角色卡文本里的引号/冒号/缩进破坏 YAML 结构；
+    // 2) 首次注入前备份原版为 patch.yml.bak（仅在无酒馆标记时备份，保证 .bak 永远是干净原版）；
+    // 3) 任何异常不写文件，静默返回，绝不把写坏的文件落盘。
     try {
       const patchPath = '/data/user/0/io.github.ccch1mneyyy.dsh_app/files/runtime/rootfs/etc/dsh-app/dsh-web.patch.yml';
       final f = File(patchPath);
       if (!f.existsSync()) return;
       var text = f.readAsStringSync();
-      // 移除旧的酒馆预设块（从标记行到下一个 "- insert:" 或文件尾）
-      final marker = '    # TAVERN_CARD_PRESET_BEGIN';
-      final endMarker = '    # TAVERN_CARD_PRESET_END';
-      if (text.contains(marker)) {
-        final startIdx = text.indexOf(marker);
+      final startMarker = '# TAVERN_CARD_PRESET_BEGIN';
+      final endMarker = '# TAVERN_CARD_PRESET_END';
+      // 移除旧酒馆预设块
+      final startIdx = text.indexOf(startMarker);
+      if (startIdx != -1) {
         final endIdx = text.indexOf(endMarker);
-        if (startIdx != -1 && endIdx != -1) {
+        if (endIdx != -1) {
           text = text.substring(0, startIdx) + text.substring(endIdx + endMarker.length);
-          // 清理可能残留的空行
           text = text.replaceAll('\n\n\n', '\n\n');
         }
       }
@@ -388,41 +399,35 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         f.writeAsStringSync(text);
         return;
       }
-      // 读取角色卡人设字段
       final cardFile = File(_activeCardPath!);
       final card = json.decode(cardFile.readAsStringSync()) as Map<String, dynamic>;
       final data = (card['data'] is Map) ? card['data'] as Map<String, dynamic> : card;
+      String esc(dynamic v) => json.encode((v ?? '').toString());
       final name = (data['name'] ?? _activeCardName ?? '角色').toString();
       final desc = (data['description'] ?? '').toString();
       final personality = (data['personality'] ?? '').toString();
       final scenario = (data['scenario'] ?? '').toString();
       final firstMes = (data['first_mes'] ?? '').toString();
-
       final promptLines = <String>[
         '你是「$name」。请完全沉浸在角色扮演中，始终以 $name 的身份与用户对话。',
-        if (desc.isNotEmpty) ...['', '【角色设定】', desc],
-        if (personality.isNotEmpty) ...['', '【性格特征】', personality],
-        if (scenario.isNotEmpty) ...['', '【当前场景】', scenario],
-        if (firstMes.isNotEmpty) ...['', '【开场白参考】', firstMes],
-        '',
+        if (desc.isNotEmpty) '【角色设定】\n$desc',
+        if (personality.isNotEmpty) '【性格特征】\n$personality',
+        if (scenario.isNotEmpty) '【当前场景】\n$scenario',
+        if (firstMes.isNotEmpty) '【开场白参考】\n$firstMes',
         '【扮演规则】',
         '- 永远保持 $name 的身份、语气和性格，不要跳出角色。',
         '- 说话自然生动，符合角色人设，不要使用助手式的口吻。',
         '- 不讨论扮演本身，除非用户明确要求。',
       ];
-      final prefix = promptLines.join('\n');
-      // YAML 块标量：每行缩进 16 格（patch 内 persona.prefix 层级）
-      final yamlPrefix = prefix.split('\n').map((l) => l.isEmpty ? '' : '                $l').join('\n');
-
+      final prefix = json.encode(promptLines.join('\n'));
       final block = [
-        marker,
-        '    # 由酒馆设定页自动生成：当前装配角色卡 → 官方 Agent 预设',
+        '# TAVERN_CARD_PRESET_BEGIN',
         '    - id: preset-tavern-card',
         "      name: '@deepseek-ai/dsh-agent-preset'",
         '      config:',
         '        id: tavern-card',
-        '        name: 酒馆·$name',
-        '        description: 角色卡扮演：$name。只有人设，没有工具。',
+        '        name: ${esc('酒馆·$name')}',
+        '        description: ${esc('角色卡扮演：$name。只有人设，没有工具。')}',
         '        order: 92',
         '        plugins:',
         '          - id: persona',
@@ -430,7 +435,7 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         '            config:',
         '              complete: true',
         '              includeRuntimeContext: false',
-        '              prefix: |-$yamlPrefix',
+        '              prefix: $prefix',
         '          - id: compaction',
         '            name: cordis:group',
         '            group: true',
@@ -441,10 +446,18 @@ class _TavernSettingsPageState extends State<TavernSettingsPage> with SingleTick
         "                name: '@deepseek-ai/dsh-compaction-basic'",
         '              - id: command-compact',
         "                name: '@deepseek-ai/dsh-command-compact'",
-        endMarker,
+        '# TAVERN_CARD_PRESET_END',
       ].join('\n');
-      text = '$text\n$block\n';
-      f.writeAsStringSync(text);
+      // 首次注入前备份干净原版
+      final bak = File('$patchPath.bak');
+      if (!bak.existsSync() && !text.contains(startMarker)) {
+        try {
+          bak.writeAsStringSync(text);
+        } catch (_) {}
+      }
+      // 校验：jsonEncode 保证字符串单行；block 内不允许空行注入
+      if (prefix.contains('\n') || block.contains('\n\n')) return;
+      f.writeAsStringSync('$text\n$block\n');
     } catch (_) {
       // 预设注入失败不影响装配本身
     }
